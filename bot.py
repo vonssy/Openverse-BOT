@@ -143,31 +143,36 @@ class OpenVerse:
         
     def extract_cookies(self, raw_cookies: list):
         cookies_dict = {}
+        try:
+            skip_keys = ['expires', 'path', 'domain', 'samesite', 'secure', 'httponly', 'max-age']
 
-        skip_keys = ['expires', 'path', 'domain', 'samesite', 'secure', 'httponly', 'max-age']
+            for cookie_str in raw_cookies:
+                cookie_parts = cookie_str.split(';')
 
-        for cookie_str in raw_cookies:
-            cookie_parts = cookie_str.split(';')
+                for part in cookie_parts:
+                    cookie = part.strip()
 
-            for part in cookie_parts:
-                cookie = part.strip()
+                    if '=' in cookie:
+                        name, value = cookie.split('=', 1)
 
-                if '=' in cookie:
-                    name, value = cookie.split('=', 1)
+                        if name and value and name.lower() not in skip_keys:
+                            cookies_dict[name] = value
 
-                    if name and value and name.lower() not in skip_keys:
-                        cookies_dict[name] = value
-
-        cookie_header = "; ".join([f"{key}={value}" for key, value in cookies_dict.items()])
-        
-        return cookie_header
+            cookie_header = "; ".join([f"{key}={value}" for key, value in cookies_dict.items()])
+            
+            return cookie_header
+        except Exception as e:
+            return None
 
     def extract_xsrf_token(self, cookie_header: str):
-        xsrf_token, openverse_launch_session = cookie_header.split(';', 1)
+        try:
+            xsrf_token, openverse_launch_session = cookie_header.split(';', 1)
 
-        name, value = xsrf_token.split('=', 1)
-        decoded_value = unquote(value)
-        return decoded_value
+            name, value = xsrf_token.split('=', 1)
+            decoded_value = unquote(value)
+            return decoded_value
+        except Exception as e:
+            return None
     
     def mask_account(self, account):
         mask_account = account[:6] + '*' * 6 + account[-6:]
@@ -204,10 +209,13 @@ class OpenVerse:
                         response.raise_for_status()
 
                         raw_cookies = response.headers.getall('Set-Cookie', [])
-                        cookie_header = self.extract_cookies(raw_cookies)
-                        xsrf_token = self.extract_xsrf_token(cookie_header)
+                        if raw_cookies:
+                            cookie_header = self.extract_cookies(raw_cookies)
 
-                        return cookie_header, xsrf_token
+                            if cookie_header:
+                                xsrf_token = self.extract_xsrf_token(cookie_header)
+
+                                return cookie_header, xsrf_token
             except (Exception, ClientResponseError) as e:
                 if attempt < retries - 1:
                     await asyncio.sleep(5)
@@ -231,13 +239,15 @@ class OpenVerse:
                     async with session.post(url=url, headers=headers, data=data) as response:
                         response.raise_for_status()
                         result = await response.json()
-                        access_token = result["data"]["access_token"]
 
                         raw_cookies = response.headers.getall('Set-Cookie', [])
-                        cookie_header = self.extract_cookies(raw_cookies)
-                        xsrf_token = self.extract_xsrf_token(cookie_header)
-                        
-                        return access_token, cookie_header, xsrf_token
+                        if raw_cookies:
+                            cookie_header = self.extract_cookies(raw_cookies)
+
+                            if cookie_header:
+                                xsrf_token = self.extract_xsrf_token(cookie_header)
+
+                                return result, cookie_header, xsrf_token
             except (Exception, ClientResponseError) as e:
                 if attempt < retries - 1:
                     await asyncio.sleep(5)
@@ -340,13 +350,13 @@ class OpenVerse:
         if csrf_cookie:
             proxy = self.get_next_proxy_for_account(address) if use_proxy else None
 
-            access_token = None
+            token = None
             cookie = None
             xsrf_token = None
 
-            while access_token is None or cookie is None or xsrf_token is None:
-                access_token, cookie, xsrf_token = await self.bind_login(account, address, proxy)
-                if not access_token or not cookie or not xsrf_token:
+            while token is None or cookie is None or xsrf_token is None:
+                token, cookie, xsrf_token = await self.bind_login(account, address, proxy)
+                if not token or not cookie or not xsrf_token:
                     self.log(
                         f"{Fore.CYAN+Style.BRIGHT}Status    :{Style.RESET_ALL}"
                         f"{Fore.RED+Style.BRIGHT} Login Failed {Style.RESET_ALL}"
@@ -358,7 +368,7 @@ class OpenVerse:
                     await asyncio.sleep(5)
                     continue
 
-                self.access_tokens[address] = access_token
+                self.access_tokens[address] = token["data"]["access_token"]
                 self.cookie_headers[address] = cookie
                 self.xsrf_tokens[address] = xsrf_token
 
@@ -498,6 +508,7 @@ class OpenVerse:
             return
         except Exception as e:
             self.log(f"{Fore.RED+Style.BRIGHT}Error: {e}{Style.RESET_ALL}")
+            raise e
 
 if __name__ == "__main__":
     try:
