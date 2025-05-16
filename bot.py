@@ -27,8 +27,8 @@ class OpenVerse:
             "Sec-Fetch-Site": "same-origin",
             "User-Agent": FakeUserAgent().random
         }
-        self.ref_code = "0x1d1afc2d015963017bed1de13e4ed6c3d3ed1618" # U can change it with yours.
         self.BASE_API = "https://launch.openverse.network"
+        self.ref_code = "0x1d1afc2d015963017bed1de13e4ed6c3d3ed1618" # U can change it with yours.
         self.proxies = []
         self.proxy_index = 0
         self.account_proxies = {}
@@ -181,10 +181,10 @@ class OpenVerse:
     def print_question(self):
         while True:
             try:
-                print("1. Run With Monosans Proxy")
-                print("2. Run With Private Proxy")
-                print("3. Run Without Proxy")
-                choose = int(input("Choose [1/2/3] -> ").strip())
+                print(f"{Fore.WHITE + Style.BRIGHT}1. Run With Monosans Proxy{Style.RESET_ALL}")
+                print(f"{Fore.WHITE + Style.BRIGHT}2. Run With Private Proxy{Style.RESET_ALL}")
+                print(f"{Fore.WHITE + Style.BRIGHT}3. Run Without Proxy{Style.RESET_ALL}")
+                choose = int(input(f"{Fore.BLUE + Style.BRIGHT}Choose [1/2/3] -> {Style.RESET_ALL}").strip())
 
                 if choose in [1, 2, 3]:
                     proxy_type = (
@@ -193,11 +193,34 @@ class OpenVerse:
                         "Run Without Proxy"
                     )
                     print(f"{Fore.GREEN + Style.BRIGHT}{proxy_type} Selected.{Style.RESET_ALL}")
-                    return choose
+                    break
                 else:
                     print(f"{Fore.RED + Style.BRIGHT}Please enter either 1, 2 or 3.{Style.RESET_ALL}")
             except ValueError:
                 print(f"{Fore.RED + Style.BRIGHT}Invalid input. Enter a number (1, 2 or 3).{Style.RESET_ALL}")
+
+        rotate = False
+        if choose in [1, 2]:
+            while True:
+                rotate = input(f"{Fore.BLUE + Style.BRIGHT}Rotate Invalid Proxy? [y/n] -> {Style.RESET_ALL}").strip()
+
+                if rotate in ["y", "n"]:
+                    rotate = rotate == "y"
+                    break
+                else:
+                    print(f"{Fore.RED + Style.BRIGHT}Invalid input. Enter 'y' or 'n'.{Style.RESET_ALL}")
+
+        return choose, rotate
+    
+    async def check_connection(self, proxy=None):
+        connector = ProxyConnector.from_url(proxy) if proxy else None
+        try:
+            async with ClientSession(connector=connector, timeout=ClientTimeout(total=30)) as session:
+                async with session.get(url=self.BASE_API, headers={}) as response:
+                    response.raise_for_status()
+                    return True
+        except (Exception, ClientResponseError) as e:
+            return None
         
     async def get_csrf_cookie(self, proxy=None, retries=5):
         url = f"{self.BASE_API}/sanctum/csrf-cookie"
@@ -320,146 +343,188 @@ class OpenVerse:
                     continue
                 return None
             
+    async def process_check_connection(self, address: str, use_proxy: bool, rotate_proxy: bool):
+        message = "Checking Connection, Wait..."
+        if use_proxy:
+            message = "Checking Proxy Connection, Wait..."
+
+        print(
+            f"{Fore.CYAN + Style.BRIGHT}[ {datetime.now().astimezone(wib).strftime('%x %X %Z')} ]{Style.RESET_ALL}"
+            f"{Fore.WHITE + Style.BRIGHT} | {Style.RESET_ALL}"
+            f"{Fore.YELLOW + Style.BRIGHT}{message}{Style.RESET_ALL}",
+            end="\r",
+            flush=True
+        )
+
+        proxy = self.get_next_proxy_for_account(address) if use_proxy else None
+
+        if rotate_proxy:
+            is_valid = None
+            while is_valid is None:
+                is_valid = await self.check_connection(proxy)
+                if not is_valid:
+                    self.log(
+                        f"{Fore.CYAN+Style.BRIGHT}Proxy     :{Style.RESET_ALL}"
+                        f"{Fore.WHITE+Style.BRIGHT} {proxy} {Style.RESET_ALL}"
+                        f"{Fore.MAGENTA+Style.BRIGHT}-{Style.RESET_ALL}"
+                        f"{Fore.RED+Style.BRIGHT} Not 200 OK, {Style.RESET_ALL}"
+                        f"{Fore.YELLOW+Style.BRIGHT}Rotating Proxy...{Style.RESET_ALL}"
+                    )
+                    proxy = self.rotate_proxy_for_account(address) if use_proxy else None
+                    await asyncio.sleep(5)
+                    continue
+
+                self.log(
+                    f"{Fore.CYAN+Style.BRIGHT}Proxy     :{Style.RESET_ALL}"
+                    f"{Fore.WHITE+Style.BRIGHT} {proxy} {Style.RESET_ALL}"
+                    f"{Fore.MAGENTA+Style.BRIGHT}-{Style.RESET_ALL}"
+                    f"{Fore.GREEN+Style.BRIGHT} 200 OK {Style.RESET_ALL}                  "
+                )
+
+                return True
+
+        is_valid = await self.check_connection(proxy)
+        if not is_valid:
+            self.log(
+                f"{Fore.CYAN+Style.BRIGHT}Proxy     :{Style.RESET_ALL}"
+                f"{Fore.WHITE+Style.BRIGHT} {proxy} {Style.RESET_ALL}"
+                f"{Fore.MAGENTA+Style.BRIGHT}-{Style.RESET_ALL}"
+                f"{Fore.RED+Style.BRIGHT} Not 200 OK {Style.RESET_ALL}          "
+            )
+            return False
+        
+        self.log(
+            f"{Fore.CYAN+Style.BRIGHT}Proxy     :{Style.RESET_ALL}"
+            f"{Fore.WHITE+Style.BRIGHT} {proxy} {Style.RESET_ALL}"
+            f"{Fore.MAGENTA+Style.BRIGHT}-{Style.RESET_ALL}"
+            f"{Fore.GREEN+Style.BRIGHT} 200 OK {Style.RESET_ALL}                  "
+        )
+
+        return True
+            
     async def process_get_csrf_cookie(self, address: str, use_proxy: bool):
         proxy = self.get_next_proxy_for_account(address) if use_proxy else None
 
-        cookie = None
-        xsrf_token = None
+        cookie, xsrf_token = await self.get_csrf_cookie(proxy)
+        if not cookie or not xsrf_token:
+            self.log(
+                f"{Fore.CYAN+Style.BRIGHT}Status    :{Style.RESET_ALL}"
+                f"{Fore.RED+Style.BRIGHT} GET XSRF Cookie Failed {Style.RESET_ALL}"
+                f"{Fore.MAGENTA+Style.BRIGHT}-{Style.RESET_ALL}"
+                f"{Fore.YELLOW+Style.BRIGHT} Skipping This Account {Style.RESET_ALL}"
+            )
+            return False
 
-        while cookie is None or xsrf_token is None:
-            cookie, xsrf_token = await self.get_csrf_cookie(proxy)
-            if not cookie or not xsrf_token:
-                self.log(
-                    f"{Fore.CYAN+Style.BRIGHT}Status    :{Style.RESET_ALL}"
-                    f"{Fore.RED+Style.BRIGHT} GET XSRF Cookie Failed {Style.RESET_ALL}"
-                    f"{Fore.MAGENTA+Style.BRIGHT}-{Style.RESET_ALL}"
-                    f"{Fore.YELLOW+Style.BRIGHT} Retrying... {Style.RESET_ALL}"
-                )
+        self.cookie_headers[address] = cookie
+        self.xsrf_tokens[address] = xsrf_token
 
-                proxy = self.rotate_proxy_for_account(address) if use_proxy else None
-                await asyncio.sleep(5)
-                continue
-
-            self.cookie_headers[address] = cookie
-            self.xsrf_tokens[address] = xsrf_token
-
-            return True
+        return True
             
     async def process_get_bind_login(self, account: str, address: str, use_proxy: bool):
         csrf_cookie = await self.process_get_csrf_cookie(address, use_proxy)
         if csrf_cookie:
             proxy = self.get_next_proxy_for_account(address) if use_proxy else None
 
-            token = None
-            cookie = None
-            xsrf_token = None
+            token, cookie, xsrf_token = await self.bind_login(account, address, proxy)
+            if not token or not cookie or not xsrf_token:
+                self.log(
+                    f"{Fore.CYAN+Style.BRIGHT}Status    :{Style.RESET_ALL}"
+                    f"{Fore.RED+Style.BRIGHT} Login Failed {Style.RESET_ALL}"
+                    f"{Fore.MAGENTA+Style.BRIGHT}-{Style.RESET_ALL}"
+                    f"{Fore.YELLOW+Style.BRIGHT} Skipping This Account {Style.RESET_ALL}"
+                )
+                return False
 
-            while token is None or cookie is None or xsrf_token is None:
-                token, cookie, xsrf_token = await self.bind_login(account, address, proxy)
-                if not token or not cookie or not xsrf_token:
-                    self.log(
-                        f"{Fore.CYAN+Style.BRIGHT}Status    :{Style.RESET_ALL}"
-                        f"{Fore.RED+Style.BRIGHT} Login Failed {Style.RESET_ALL}"
-                        f"{Fore.MAGENTA+Style.BRIGHT}-{Style.RESET_ALL}"
-                        f"{Fore.YELLOW+Style.BRIGHT} Retrying... {Style.RESET_ALL}"
-                    )
+            self.access_tokens[address] = token["data"]["access_token"]
+            self.cookie_headers[address] = cookie
+            self.xsrf_tokens[address] = xsrf_token
 
-                    proxy = self.rotate_proxy_for_account(address) if use_proxy else None
-                    await asyncio.sleep(5)
-                    continue
-
-                self.access_tokens[address] = token["data"]["access_token"]
-                self.cookie_headers[address] = cookie
-                self.xsrf_tokens[address] = xsrf_token
-
-                return True
-
-    async def process_accounts(self, account: str, address: str, use_proxy: bool):
-        bind_login = await self.process_get_bind_login(account, address, use_proxy)
-        if bind_login:
-            proxy = self.get_next_proxy_for_account(address) if use_proxy else None
-            self.log(
-                f"{Fore.CYAN+Style.BRIGHT}Status    :{Style.RESET_ALL}"
-                f"{Fore.GREEN+Style.BRIGHT} Login Success {Style.RESET_ALL}"
-            )
-            self.log(
-                f"{Fore.CYAN+Style.BRIGHT}Proxy     :{Style.RESET_ALL}"
-                f"{Fore.WHITE+Style.BRIGHT} {proxy} {Style.RESET_ALL}"
-            )
-
-            points = "N/A"
-
-            user = await self.user_info(address, proxy)
-            if user:
-                points = user.get("point", 0)
-
-            self.log(
-                f"{Fore.CYAN+Style.BRIGHT}Balance   :{Style.RESET_ALL}"
-                f"{Fore.WHITE+Style.BRIGHT} {points} PTS {Style.RESET_ALL}"
-            )
-
-            self.log(f"{Fore.CYAN+Style.BRIGHT}Task Lists:{Style.RESET_ALL}")
-
-            for category in ["userVisit", "advanceVisit"]:
-                displayed_category = "N/A"
-                if category == "userVisit":
-                    displayed_category = "Learn Odyssey & Openverse"
-                elif category == "advanceVisit":
-                    displayed_category = "Understand developer documents"
-
-                task_lists = await self.task_lists(address, category, proxy)
-                if task_lists:
-                    self.log(
-                        f"{Fore.MAGENTA+Style.BRIGHT}  ● {Style.RESET_ALL}"
-                        f"{Fore.BLUE+Style.BRIGHT}{displayed_category}{Style.RESET_ALL}"
-                    )
-
-                    tasks = task_lists.get("data", {})
-                    if tasks:
-                        for task_code, task_items in tasks.items():
-                            title = task_items.get("title")
-                            reward = task_items.get("reward_point")
-                            today_status = task_items.get("today")
-
-                            if today_status is not None:
-                                self.log(
-                                    f"{Fore.CYAN + Style.BRIGHT}    >{Style.RESET_ALL}"
-                                    f"{Fore.WHITE + Style.BRIGHT} {title} {Style.RESET_ALL}"
-                                    f"{Fore.YELLOW + Style.BRIGHT}Already Completed{Style.RESET_ALL}"
-                                )
-                                continue
-
-                            complete = await self.complete_tasks(address, category, task_code, proxy)
-                            if complete and complete.get("res_msg") == "Success":
-                                self.log(
-                                    f"{Fore.CYAN + Style.BRIGHT}    >{Style.RESET_ALL}"
-                                    f"{Fore.WHITE + Style.BRIGHT} {title} {Style.RESET_ALL}"
-                                    f"{Fore.GREEN + Style.BRIGHT}Is Completed{Style.RESET_ALL}"
-                                    f"{Fore.MAGENTA + Style.BRIGHT} - {Style.RESET_ALL}"
-                                    f"{Fore.CYAN + Style.BRIGHT}Reward:{Style.RESET_ALL}"
-                                    f"{Fore.WHITE + Style.BRIGHT} {reward} PTS {Style.RESET_ALL}"
-                                )
-                            else:
-                                self.log(
-                                    f"{Fore.CYAN + Style.BRIGHT}    >{Style.RESET_ALL}"
-                                    f"{Fore.WHITE + Style.BRIGHT} {title} {Style.RESET_ALL}"
-                                    f"{Fore.RED + Style.BRIGHT}Not Completed{Style.RESET_ALL}"
-                                )
-
-                else:
-                    self.log(
-                        f"{Fore.MAGENTA+Style.BRIGHT}  ● {Style.RESET_ALL}"
-                        f"{Fore.BLUE+Style.BRIGHT}{displayed_category}{Style.RESET_ALL}"
-                        f"{Fore.RED+Style.BRIGHT} Data Is None {Style.RESET_ALL}"
-                    )
-
+            return True
         
+    async def process_accounts(self, account: str, address: str, use_proxy: bool, rotate_proxy: bool):
+        is_valid = await self.process_check_connection(address, use_proxy, rotate_proxy)
+        if is_valid:
+            bind_login = await self.process_get_bind_login(account, address, use_proxy)
+            if bind_login:
+                proxy = self.get_next_proxy_for_account(address) if use_proxy else None
+
+                self.log(
+                    f"{Fore.CYAN+Style.BRIGHT}Status    :{Style.RESET_ALL}"
+                    f"{Fore.GREEN+Style.BRIGHT} Login Success {Style.RESET_ALL}"
+                )
+
+                points = "N/A"
+
+                user = await self.user_info(address, proxy)
+                if user:
+                    points = user.get("point", 0)
+
+                self.log(
+                    f"{Fore.CYAN+Style.BRIGHT}Balance   :{Style.RESET_ALL}"
+                    f"{Fore.WHITE+Style.BRIGHT} {points} PTS {Style.RESET_ALL}"
+                )
+
+                self.log(f"{Fore.CYAN+Style.BRIGHT}Task Lists:{Style.RESET_ALL}")
+
+                for category in ["userVisit", "advanceVisit"]:
+                    displayed_category = "N/A"
+                    if category == "userVisit":
+                        displayed_category = "Learn Odyssey & Openverse"
+                    elif category == "advanceVisit":
+                        displayed_category = "Understand developer documents"
+
+                    task_lists = await self.task_lists(address, category, proxy)
+                    if task_lists:
+                        self.log(
+                            f"{Fore.MAGENTA+Style.BRIGHT}  ● {Style.RESET_ALL}"
+                            f"{Fore.BLUE+Style.BRIGHT}{displayed_category}{Style.RESET_ALL}"
+                        )
+
+                        tasks = task_lists.get("data", {})
+                        if tasks:
+                            for task_code, task_items in tasks.items():
+                                title = task_items.get("title")
+                                reward = task_items.get("reward_point")
+                                today_status = task_items.get("today")
+
+                                if today_status is not None:
+                                    self.log(
+                                        f"{Fore.CYAN + Style.BRIGHT}    >{Style.RESET_ALL}"
+                                        f"{Fore.WHITE + Style.BRIGHT} {title} {Style.RESET_ALL}"
+                                        f"{Fore.YELLOW + Style.BRIGHT}Already Completed{Style.RESET_ALL}"
+                                    )
+                                    continue
+
+                                complete = await self.complete_tasks(address, category, task_code, proxy)
+                                if complete and complete.get("res_msg") == "Success":
+                                    self.log(
+                                        f"{Fore.CYAN + Style.BRIGHT}    >{Style.RESET_ALL}"
+                                        f"{Fore.WHITE + Style.BRIGHT} {title} {Style.RESET_ALL}"
+                                        f"{Fore.GREEN + Style.BRIGHT}Is Completed{Style.RESET_ALL}"
+                                        f"{Fore.MAGENTA + Style.BRIGHT} - {Style.RESET_ALL}"
+                                        f"{Fore.CYAN + Style.BRIGHT}Reward:{Style.RESET_ALL}"
+                                        f"{Fore.WHITE + Style.BRIGHT} {reward} PTS {Style.RESET_ALL}"
+                                    )
+                                else:
+                                    self.log(
+                                        f"{Fore.CYAN + Style.BRIGHT}    >{Style.RESET_ALL}"
+                                        f"{Fore.WHITE + Style.BRIGHT} {title} {Style.RESET_ALL}"
+                                        f"{Fore.RED + Style.BRIGHT}Not Completed{Style.RESET_ALL}"
+                                    )
+
+                    else:
+                        self.log(
+                            f"{Fore.MAGENTA+Style.BRIGHT}  ● {Style.RESET_ALL}"
+                            f"{Fore.BLUE+Style.BRIGHT}{displayed_category}{Style.RESET_ALL}"
+                            f"{Fore.RED+Style.BRIGHT} Data Is None {Style.RESET_ALL}"
+                        )
+
     async def main(self):
         try:
             with open('accounts.txt', 'r') as file:
                 accounts = [line.strip() for line in file if line.strip()]
             
-            use_proxy_choice = self.print_question()
+            use_proxy_choice, rotate_proxy = self.print_question()
 
             while True:
                 use_proxy = False
@@ -485,7 +550,7 @@ class OpenVerse:
                             f"{Fore.WHITE + Style.BRIGHT} {self.mask_account(address)} {Style.RESET_ALL}"
                             f"{Fore.CYAN + Style.BRIGHT}]{separator}{Style.RESET_ALL}"
                         )
-                        await self.process_accounts(account, address, use_proxy)
+                        await self.process_accounts(account, address, use_proxy, rotate_proxy)
                         await asyncio.sleep(3)
 
                 self.log(f"{Fore.CYAN + Style.BRIGHT}={Style.RESET_ALL}"*72)
