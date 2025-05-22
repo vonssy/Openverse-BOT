@@ -20,6 +20,8 @@ class OpenVerse:
         self.headers = {
             "Accept": "application/json, text/plain, */*",
             "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7",
+            "Connection": "keep-alive",
+            "Host": "launch.openverse.network",
             "Origin": "https://launch.openverse.network",
             "Referer": "https://launch.openverse.network/",
             "Sec-Fetch-Dest": "empty",
@@ -255,6 +257,7 @@ class OpenVerse:
             "Cookie": self.cookie_headers[address],
             "X-Xsrf-Token": self.xsrf_tokens[address]
         }
+        await asyncio.sleep(3)
         for attempt in range(retries):
             connector = ProxyConnector.from_url(proxy) if proxy else None
             try:
@@ -285,6 +288,7 @@ class OpenVerse:
             "Cookie": self.cookie_headers[address],
             "X-Xsrf-Token": self.xsrf_tokens[address]
         }
+        await asyncio.sleep(3)
         for attempt in range(retries):
             connector = ProxyConnector.from_url(proxy) if proxy else None
             try:
@@ -306,6 +310,7 @@ class OpenVerse:
             "Cookie": self.cookie_headers[address],
             "X-Xsrf-Token": self.xsrf_tokens[address]
         }
+        await asyncio.sleep(3)
         for attempt in range(retries):
             connector = ProxyConnector.from_url(proxy) if proxy else None
             try:
@@ -330,6 +335,7 @@ class OpenVerse:
             "Cookie": self.cookie_headers[address],
             "X-Xsrf-Token": self.xsrf_tokens[address]
         }
+        await asyncio.sleep(3)
         for attempt in range(retries):
             connector = ProxyConnector.from_url(proxy) if proxy else None
             try:
@@ -504,6 +510,12 @@ class OpenVerse:
                                         f"{Fore.MAGENTA + Style.BRIGHT} - {Style.RESET_ALL}"
                                         f"{Fore.CYAN + Style.BRIGHT}Reward:{Style.RESET_ALL}"
                                         f"{Fore.WHITE + Style.BRIGHT} {reward} PTS {Style.RESET_ALL}"
+                                    )
+                                elif complete and complete.get("res_msg") == "You have finished this task yet!":
+                                    self.log(
+                                        f"{Fore.CYAN + Style.BRIGHT}    >{Style.RESET_ALL}"
+                                        f"{Fore.WHITE + Style.BRIGHT} {title} {Style.RESET_ALL}"
+                                        f"{Fore.YELLOW + Style.BRIGHT}Already Completed{Style.RESET_ALL}"
                                     )
                                 else:
                                     self.log(
